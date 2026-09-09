@@ -1,5 +1,7 @@
 import {createBrowserClient} from '@supabase/ssr'
-export const supabase=createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!)
+const url=process.env.NEXT_PUBLIC_SUPABASE_URL||'https://gjzcbqyzyvkgexvzofbq.supabase.co'
+const key=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||'sb_publishable_ZeUDdrYZMiTRwX_WD_q3eg_3w7hNIo9'
+export const supabase=createBrowserClient(url,key)
 export type School={id:string;name:string;npsn:string|null;academic_year:string}
 export type Member={school_id:string;role:'principal'|'staff';status:string;schools:School}
 export type Student={id:string;nis:string;name:string;guardian_name:string|null;guardian_phone:string|null;status:string;class_id:string|null;classes?:{name:string}|null}
