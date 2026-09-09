@@ -5,7 +5,7 @@ let source = fs.readFileSync(path, 'utf8')
 
 // Make invitation links behave like the Kepsek AI team flow.
 const routingFrom = "if(!userId)return <Auth onDone={(id)=>{setUserId(id);reload(id)}} notify={notify}/>"
-const routingTo = "const inviteToken=new URLSearchParams(typeof location==='undefined'?'':location.search).get('invite')\n if(!userId)return <Auth inviteToken={inviteToken} onDone={(id)=>{setUserId(id);reload(id)}} notify={notify}/>"
+const routingTo = "const inviteToken=new URLSearchParams(typeof location==='undefined'?'':location.search).get('invite')\n if(!userId)return <Auth inviteToken={inviteToken} onDone={(id)=>{setUserId(id);reload(id)}} notify={notify}/>\n if(inviteToken&&member?.role==='principal')return <InviteConflict onDone={()=>{history.replaceState({},'',location.pathname);setView('dashboard')}}/>"
 if (source.includes(routingFrom)) source = source.replace(routingFrom, routingTo)
 
 const authSigFrom = "function Auth({onDone,notify}:{onDone:(id:string)=>void;notify:(s:string,k?:'ok'|'error')=>void}){"
@@ -15,6 +15,15 @@ if (source.includes(authSigFrom)) source = source.replace(authSigFrom, authSigTo
 const signinFrom = "if(result.error)return fail(result.error.message);notify(mode==='login'?'Berhasil masuk':'Akun berhasil dibuat dan langsung masuk');onDone(result.data.user.id)"
 const signinTo = "if(result.error)return fail(result.error.message);if(inviteToken){const joined=await supabase.rpc('accept_invitation',{raw_token:inviteToken});if(joined.error)return fail('Undangan tidak dapat diterima: '+joined.error.message);history.replaceState({},'',location.pathname);notify('Akun staf berhasil dibuat dan bergabung ke sekolah');onDone(result.data.user.id)}else{notify(mode==='login'?'Berhasil masuk':'Akun berhasil dibuat dan langsung masuk');onDone(result.data.user.id)}"
 if (source.includes(signinFrom)) source = source.replace(signinFrom, signinTo)
+
+const conflictMarker = "function Brand({compact=false}:{compact?:boolean})"
+const conflictComponent = String.raw`function InviteConflict({onDone}:{onDone:()=>void}){
+ const logout=async()=>{await supabase.auth.signOut();history.replaceState({},'',location.pathname+'?invite='+encodeURIComponent(new URLSearchParams(location.search).get('invite')||''));window.location.reload()}
+ return <div className="onboard"><Brand/><div className="onboard-card"><span className="eyebrow">UNDANGAN TIM SEKOLAH</span><h1>Gunakan akun staf sekolah</h1><p>Link ini khusus untuk bergabung sebagai Bendahara/Staf. Akun Kepala Sekolah tidak dapat diubah menjadi akun staf.</p><div className="team-note"><b>Masuk dengan akun staf</b><span>Keluar dari akun Kepala Sekolah ini, lalu buka kembali link undangan menggunakan akun staf yang akan bergabung.</span></div><button className="primary" onClick={logout}>Keluar dan lanjut dengan akun staf</button><button className="secondary" onClick={onDone}>Kembali ke dashboard</button></div></div>
+}
+
+`
+if (!source.includes('function InviteConflict(') && source.includes(conflictMarker)) source = source.replace(conflictMarker, conflictComponent + conflictMarker)
 
 const start = source.indexOf('function Team(')
 const end = source.indexOf('\nfunction SchoolSettings(', start)
