@@ -1,0 +1,17 @@
+create index if not exists audit_logs_user_id_idx on public.audit_logs(user_id);
+create index if not exists bills_created_by_idx on public.bills(created_by);
+create index if not exists bills_student_id_idx on public.bills(student_id);
+create index if not exists invitations_accepted_by_idx on public.invitations(accepted_by);
+create index if not exists invitations_invited_by_idx on public.invitations(invited_by);
+create index if not exists invitations_school_id_idx on public.invitations(school_id);
+create index if not exists payment_allocations_bill_id_idx on public.payment_allocations(bill_id);
+create index if not exists payments_cash_account_id_idx on public.payments(cash_account_id);
+create index if not exists payments_created_by_idx on public.payments(created_by);
+create index if not exists payments_student_id_idx on public.payments(student_id);
+create index if not exists schools_created_by_idx on public.schools(created_by);
+create index if not exists students_class_id_idx on public.students(class_id);
+create index if not exists transactions_activity_id_idx on public.transactions(activity_id);
+create index if not exists transactions_cash_account_id_idx on public.transactions(cash_account_id);
+create index if not exists transactions_created_by_idx on public.transactions(created_by);
+create index if not exists transactions_student_id_idx on public.transactions(student_id);
+create index if not exists transactions_target_cash_account_id_idx on public.transactions(target_cash_account_id);
