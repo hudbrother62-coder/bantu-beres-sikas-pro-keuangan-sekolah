@@ -1,13 +1,14 @@
 'use client'
 
 import Image from 'next/image'
-import {useEffect,useMemo,useState} from 'react'
+import {useEffect,useMemo,useRef,useState} from 'react'
 import {supabase,type Member,type Student,type Cash,type Tx,type Bill,type School} from '@/lib/supabase'
-import {BarChart3,BookOpen,Building2,Download,FileText,GraduationCap,LayoutDashboard,LogOut,Menu,Moon,Plus,ReceiptText,Settings,Sun,Users,WalletCards,X} from 'lucide-react'
+import {BarChart3,BookOpen,Building2,Download,FileText,GraduationCap,LayoutDashboard,LogOut,Menu,Moon,Plus,ReceiptText,Settings,Sun,Upload,Users,WalletCards,X} from 'lucide-react'
 import {Bar,BarChart,CartesianGrid,ResponsiveContainer,Tooltip,XAxis,YAxis} from 'recharts'
 
 type View='dashboard'|'finance'|'students'|'bills'|'budget'|'reports'|'team'|'settings'|'owner'
 type Toast={kind:'ok'|'error';text:string}|null
+type ImportedStudent={nis:string;nisn:string;name:string;className:string;guardianName:string;phone:string;line:number}
 const money=(n:number)=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0)
 const date=()=>new Date().toISOString().slice(0,10)
 const number=(prefix:string)=>`${prefix}-${Date.now().toString().slice(-10)}`
@@ -71,13 +72,37 @@ function Finance({school,notify}:{school:School;notify:(s:string,k?:'ok'|'error'
 }
 
 function Students({school,notify}:{school:School;notify:(s:string,k?:'ok'|'error')=>void}){
- const [items,setItems]=useState<Student[]>([]),[classes,setClasses]=useState<{id:string;name:string}[]>([]),[modal,setModal]=useState(false),[busy,setBusy]=useState(false)
+ const [items,setItems]=useState<Student[]>([]),[classes,setClasses]=useState<{id:string;name:string}[]>([]),[modal,setModal]=useState(false),[busy,setBusy]=useState(false),[importing,setImporting]=useState(false),[importNote,setImportNote]=useState<{kind:'ok'|'error';text:string}|null>(null)
+ const fileRef=useRef<HTMLInputElement>(null)
  const load=()=>Promise.all([supabase.from('students').select('*,classes(name)').eq('school_id',school.id).order('name'),supabase.from('classes').select('*').eq('school_id',school.id).eq('active',true)]).then(([a,b])=>{setItems((a.data||[]) as Student[]);setClasses(b.data||[])})
  useEffect(()=>{load()},[school.id])
  const addClass=async()=>{const name=prompt('Nama kelas baru:');if(!name)return;const {error}=await supabase.from('classes').insert({school_id:school.id,name});if(error)return notify(error.message,'error');notify('Kelas ditambahkan');load()}
- const save=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();setBusy(true);const f=new FormData(e.currentTarget);const {error}=await supabase.from('students').insert({school_id:school.id,nis:f.get('nis'),name:f.get('name'),class_id:f.get('class_id')||null,guardian_name:f.get('guardian_name'),guardian_phone:f.get('guardian_phone')});setBusy(false);if(error)return notify(error.message,'error');notify('Siswa ditambahkan');setModal(false);load()}
+ const save=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();setBusy(true);const f=new FormData(e.currentTarget);const {error}=await supabase.from('students').insert({school_id:school.id,nis:f.get('nis'),nisn:f.get('nisn')||null,name:f.get('name'),class_id:f.get('class_id')||null,guardian_name:f.get('guardian_name'),guardian_phone:f.get('guardian_phone')});setBusy(false);if(error)return notify(error.message,'error');notify('Siswa ditambahkan');setModal(false);load()}
+ const importExcel=async(e:React.ChangeEvent<HTMLInputElement>)=>{const file=e.target.files?.[0];e.target.value='';if(!file)return;setImporting(true);setImportNote(null);try{
+  if(file.size>5*1024*1024)throw new Error('Ukuran file maksimal 5 MB.')
+  const XLSX=await import('xlsx'),book=XLSX.read(await file.arrayBuffer(),{type:'array'}),sheet=book.Sheets['Data Siswa']||book.Sheets[book.SheetNames[0]]
+  if(!sheet)throw new Error('File tidak memiliki lembar data.')
+  const matrix=XLSX.utils.sheet_to_json<unknown[]>(sheet,{header:1,defval:'',raw:false}),key=(v:unknown)=>String(v??'').trim().toLowerCase().normalize('NFKD').replace(/[^a-z0-9]/g,''),clean=(v:unknown)=>String(v??'').trim()
+  const aliases:Record<string,string>={nis:'nis',nisn:'nisn',nama:'name',namalengkap:'name',kelas:'className',wali:'guardianName',namawali:'guardianName',orangtua:'guardianName',nomorwhatsapp:'phone',nowhatsapp:'phone',whatsapp:'phone',nohp:'phone'}
+  const headerIndex=matrix.findIndex(row=>Array.isArray(row)&&row.some(v=>key(v)==='nis')&&row.some(v=>['nama','namalengkap'].includes(key(v))))
+  if(headerIndex<0)throw new Error('Kolom NIS dan Nama Lengkap tidak ditemukan. Gunakan template yang disediakan.')
+  const columns=(matrix[headerIndex]||[]).map(v=>aliases[key(v)]||''),issues:string[]=[],seen=new Set<string>()
+  const rows=matrix.slice(headerIndex+1).map((row,i)=>{const record:ImportedStudent={nis:'',nisn:'',name:'',className:'',guardianName:'',phone:'',line:headerIndex+i+2};columns.forEach((name,j)=>{if(name)record[name as keyof Omit<ImportedStudent,'line'>]=clean(row[j])});return record}).filter(r=>r.nis||r.name||r.className||r.guardianName||r.phone)
+  if(!rows.length)throw new Error('Tidak ada data siswa untuk diimpor. Isi mulai baris 5 pada template.')
+  if(rows.length>1000)throw new Error('Maksimal 1.000 siswa dalam satu kali impor.')
+  for(const row of rows){if(!row.nis)issues.push(`Baris ${row.line}: NIS wajib diisi.`);if(!row.name)issues.push(`Baris ${row.line}: Nama Lengkap wajib diisi.`);if(row.nis&&seen.has(row.nis))issues.push(`Baris ${row.line}: NIS ${row.nis} duplikat di file.`);if(row.phone&&!/^(?:0|\+?62)\d{8,13}$/.test(row.phone.replace(/[\s()-]/g,'')))issues.push(`Baris ${row.line}: format WhatsApp tidak valid.`);seen.add(row.nis)}
+  if(issues.length)throw new Error(`${issues.slice(0,5).join(' ')}${issues.length>5?` Ada ${issues.length-5} masalah lain.`:''}`)
+  const [{data:existing,error:studentError},{data:currentClasses,error:classError}]=await Promise.all([supabase.from('students').select('nis').eq('school_id',school.id),supabase.from('classes').select('id,name').eq('school_id',school.id).eq('active',true)])
+  if(studentError||classError)throw studentError||classError
+  const existingNis=new Set((existing||[]).map(s=>s.nis)),classMap=new Map((currentClasses||[]).map(c=>[c.name.trim().toLowerCase(),c.id])),newClassNames=[...new Map(rows.filter(r=>r.className&&!classMap.has(r.className.toLowerCase())).map(r=>[r.className.toLowerCase(),r.className])).values()]
+  if(newClassNames.length){const {error}=await supabase.from('classes').upsert(newClassNames.map(name=>({school_id:school.id,name})),{onConflict:'school_id,name',ignoreDuplicates:true});if(error)throw error;const {data,error:reloadError}=await supabase.from('classes').select('id,name').eq('school_id',school.id).eq('active',true);if(reloadError)throw reloadError;(data||[]).forEach(c=>classMap.set(c.name.trim().toLowerCase(),c.id))}
+  const skipped=rows.filter(r=>existingNis.has(r.nis)).length,payload=rows.filter(r=>!existingNis.has(r.nis)).map(r=>({school_id:school.id,nis:r.nis,nisn:r.nisn||null,name:r.name,class_id:r.className?classMap.get(r.className.toLowerCase())||null:null,guardian_name:r.guardianName||null,guardian_phone:r.phone?.replace(/[\s()-]/g,'')||null}))
+  if(!payload.length)throw new Error(`Semua ${skipped} NIS sudah ada. Tidak ada siswa baru yang ditambahkan.`)
+  const {error}=await supabase.from('students').insert(payload);if(error)throw error
+  const text=`${payload.length} siswa berhasil diimpor${skipped?`; ${skipped} NIS yang sudah ada dilewati.`:'.'}`;setImportNote({kind:'ok',text});notify(`${payload.length} siswa berhasil diimpor`);await load()
+ }catch(error){const text=error instanceof Error?error.message:'File tidak dapat diproses.';setImportNote({kind:'error',text});notify('Impor gagal. Lihat keterangan pada halaman.','error')}finally{setImporting(false)}}
  const deactivate=async(id:string)=>{if(!confirm('Nonaktifkan siswa ini? Riwayat keuangan tetap disimpan.'))return;const {error}=await supabase.from('students').update({status:'inactive'}).eq('id',id);if(error)return notify(error.message,'error');notify('Siswa dinonaktifkan');load()}
- return <><Toolbar title="Data siswa" text={`${items.filter(i=>i.status==='active').length} siswa aktif`}><button className="secondary" onClick={addClass}><Plus/>Kelas</button><button className="primary small" onClick={()=>setModal(true)}><Plus/>Tambah siswa</button></Toolbar><Card><DataTable headers={['NIS','Nama','Kelas','Wali','WhatsApp','Status','Aksi']} rows={items.map(s=>[s.nis,s.name,s.classes?.name||'—',s.guardian_name||'—',s.guardian_phone||'—',<Badge key="s" tone={s.status==='active'?'green':'muted'}>{s.status}</Badge>,s.status==='active'?<button key="x" className="link danger" onClick={()=>deactivate(s.id)}>Nonaktifkan</button>:'—'])}/></Card>{modal&&<Modal title="Tambah siswa" onClose={()=>setModal(false)}><form onSubmit={save}><div className="two"><Field label="NIS" name="nis" required/><label className="field"><span>Kelas</span><select name="class_id"><option value="">Belum ditentukan</option>{classes.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label></div><Field label="Nama lengkap" name="name" required/><Field label="Nama wali" name="guardian_name"/><Field label="Nomor WhatsApp" name="guardian_phone" placeholder="08xxxxxxxxxx"/><button className="primary" disabled={busy}>{busy?'Menyimpan…':'Simpan siswa'}</button></form></Modal>}</>
+ return <><Toolbar title="Data siswa" text={`${items.filter(i=>i.status==='active').length} siswa aktif`}><a className="secondary download-link" href="/Template-Import-Siswa-SIKAS-Pro.xlsx" download><Download/>Template Excel</a><button className="secondary" onClick={()=>fileRef.current?.click()} disabled={importing}><Upload/>{importing?'Mengimpor…':'Import Excel'}</button><input ref={fileRef} className="file-input" type="file" accept=".xlsx,.xls" onChange={importExcel}/><button className="secondary" onClick={addClass}><Plus/>Kelas</button><button className="primary small" onClick={()=>setModal(true)}><Plus/>Tambah siswa</button></Toolbar>{importNote&&<div className={`import-note ${importNote.kind}`} role={importNote.kind==='error'?'alert':'status'}><b>{importNote.kind==='error'?'Impor belum berhasil':'Impor selesai'}</b><span>{importNote.text}</span></div>}<Card><DataTable headers={['NIS','NISN','Nama','Kelas','Wali','WhatsApp','Status','Aksi']} rows={items.map(s=>[s.nis,s.nisn||'—',s.name,s.classes?.name||'—',s.guardian_name||'—',s.guardian_phone||'—',<Badge key="s" tone={s.status==='active'?'green':'muted'}>{s.status}</Badge>,s.status==='active'?<button key="x" className="link danger" onClick={()=>deactivate(s.id)}>Nonaktifkan</button>:'—'])}/></Card>{modal&&<Modal title="Tambah siswa" onClose={()=>setModal(false)}><form onSubmit={save}><div className="two"><Field label="NIS" name="nis" required/><Field label="NISN" name="nisn"/></div><label className="field"><span>Kelas</span><select name="class_id"><option value="">Belum ditentukan</option>{classes.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><Field label="Nama lengkap" name="name" required/><Field label="Nama wali" name="guardian_name"/><Field label="Nomor WhatsApp" name="guardian_phone" placeholder="08xxxxxxxxxx"/><button className="primary" disabled={busy}>{busy?'Menyimpan…':'Simpan siswa'}</button></form></Modal>}</>
 }
 
 function Bills({school,notify}:{school:School;notify:(s:string,k?:'ok'|'error')=>void}){
